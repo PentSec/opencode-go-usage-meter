@@ -1,0 +1,51 @@
+name: publish
+
+# Publishes the package to npm using trusted publishing (OIDC).
+#
+# There is no NPM_TOKEN. npm verifies the GitHub OIDC claims against the
+# trusted publisher configured for this package, which must match:
+#   organization or user: PentSec
+#   repository:           opencode-go-usage-meter
+#   workflow filename:    publish.yml
+#   environment name:     (empty)
+#
+# In the trusted publisher settings, allow direct publishing as well as
+# `npm stage publish`, otherwise this workflow can only stage a release that a
+# maintainer has to approve manually.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC and provenance
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Trusted publishing needs npm >= 11.5.1; Node 22 ships npm 10.
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      - name: Versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Publish
+        run: npm publish --provenance --access public
