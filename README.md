@@ -1,3 +1,14 @@
+
+<p align="center">OpenCode Go subscription usage in the OpenCode v2 TUI sidebar</p>
+<p align="center">
+  <img alt="NPM Version" src="https://img.shields.io/npm/v/opencode-go-usage-meter">
+  <img alt="NPM Downloads" src="https://img.shields.io/npm/dw/opencode-go-usage-meter">
+  <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/PentSec/opencode-go-usage-meter/publish.yml">
+  <img alt="NPM License" src="https://img.shields.io/npm/l/opencode-go-usage-meter">
+</p>
+
+<img width="1542" height="1080" alt="screenshot_1 5x_postspark_2026-10-21_17-00-49" src="https://github.com/user-attachments/assets/0df5943a-aff3-481e-8743-b6d56c7e38d2" />
+
 # opencode-go-usage-meter
 
 OpenCode Go subscription usage in the OpenCode **v2** TUI sidebar: the same
