@@ -1,0 +1,47 @@
+{
+  "name": "opencode-go-usage-meter",
+  "version": "0.1.0",
+  "description": "OpenCode Go subscription usage bars (rolling, weekly, monthly) in the OpenCode v2 TUI sidebar.",
+  "author": "PentSec",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.tsx"
+  },
+  "files": [
+    "index.ts",
+    "tui.tsx",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "opencode-go",
+    "opencode-tui",
+    "usage",
+    "quota",
+    "sidebar"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PentSec/opencode-go-usage-meter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PentSec/opencode-go-usage-meter/issues"
+  },
+  "homepage": "https://github.com/PentSec/opencode-go-usage-meter#readme",
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  },
+  "dependencies": {
+    "@opencode/plugin": "latest"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.6.6",
+    "@opentui/solid": ">=0.6.6",
+    "solid-js": ">=1.9.0"
+  }
+}
