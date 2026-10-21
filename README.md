@@ -123,31 +123,6 @@ active when the TUI attaches to a remote server, also list the package in
 }
 ```
 
-## Publishing
-
-The repository ships `.github/workflows/publish.yml`, which publishes with
-[trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC). No npm
-token is stored in the repository.
-
-Configure the trusted publisher on npm with these exact values, since the
-connection cannot be edited after it is created:
-
-| Field | Value |
-| --- | --- |
-| Publisher | GitHub Actions |
-| Organization or user | `PentSec` |
-| Repository | `opencode-go-usage-meter` |
-| Workflow filename | `publish.yml` |
-| Environment name | empty |
-
-Allow **direct publishing** in the allowed actions. `npm stage publish` is always
-allowed, but the workflow runs `npm publish`, so limiting the connection to
-staged publishing makes the job stage a release that a maintainer must approve.
-
-The workflow runs when a GitHub release is published, or manually from the
-Actions tab. Bump `version` in `package.json` first: the release publishes
-whatever that field contains.
-
 ## Privacy
 
 The plugin reads a credential from the local machine and sends it only to
