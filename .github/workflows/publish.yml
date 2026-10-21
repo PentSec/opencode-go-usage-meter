@@ -1,17 +1,29 @@
 name: publish
 
-# Publishes the package to npm using trusted publishing (OIDC).
+# Publishes opencode-go-usage-meter to npm using trusted publishing (OIDC).
 #
 # There is no NPM_TOKEN. npm verifies the GitHub OIDC claims against the
-# trusted publisher configured for this package, which must match:
+# trusted publisher configured for this package. On npmjs.com, the package
+# settings -> Trusted Publisher -> GitHub Actions entry must match:
 #   organization or user: PentSec
 #   repository:           opencode-go-usage-meter
 #   workflow filename:    publish.yml
 #   environment name:     (empty)
 #
-# In the trusted publisher settings, allow direct publishing as well as
-# `npm stage publish`, otherwise this workflow can only stage a release that a
-# maintainer has to approve manually.
+# "organization or user" is the GitHub owner, not the npm account: npm resolves
+# the publishing npm user (jeffcoding, the package owner) from the OIDC token.
+#
+# Notes:
+#   - The package must already exist on npm before a trusted publisher can be
+#     configured for it, so the first version is published locally with a
+#     token and only later releases go through this workflow.
+#   - A new trusted publisher configuration expires if it does not complete its
+#     first successful publish within 2 days. If that happens, delete it and
+#     create it again.
+#   - `npm stage publish` is always allowed; direct publishing is a separate
+#     opt-in this workflow needs, otherwise a release can only be staged for
+#     manual approval.
+#   - Trusted publishing requires npm >= 11.5.1 and Node >= 22.14.0.
 
 on:
   release:
@@ -46,6 +58,16 @@ jobs:
         run: |
           node --version
           npm --version
+
+      # The trusted publisher is bound to one package name. Fail before the
+      # publish instead of getting an opaque ENEEDAUTH from the registry.
+      - name: Verify package name
+        run: |
+          name=$(npm pkg get name | tr -d '"')
+          if [ "$name" != "opencode-go-usage-meter" ]; then
+            echo "Unexpected package name: $name" >&2
+            exit 1
+          fi
 
       - name: Publish
         run: npm publish --provenance --access public
