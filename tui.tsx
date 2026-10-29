@@ -13,6 +13,26 @@ import { clampPercent, fetchUsage, type Usage, type UsageWindow, type UsageWindo
 const POLL_MS = 60_000
 const CLOCK_MS = 30_000
 
+/** Upper bound for a whole refresh cycle, credential lookup included. */
+const REFRESH_TIMEOUT_MS = 15_000
+
+/**
+ * Race a promise against a deadline. Resolves `undefined` when the deadline
+ * wins, so the caller can tell a timeout apart from a real result.
+ */
+async function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), ms)
+  })
+
+  try {
+    return await Promise.race([promise, deadline])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 const ROWS: { key: UsageWindowKind; label: string }[] = [
   { key: "rolling", label: "5h" },
   { key: "weekly", label: "7d" },
@@ -80,15 +100,27 @@ const Panel = (props: { theme: unknown }) => {
   const palette = () => paletteOf(props.theme)
 
   let disposed = false
+  let refreshing = false
 
   const refresh = async () => {
+    if (refreshing) return
+    refreshing = true
+
     try {
-      const result = await fetchUsage()
+      const result = await withDeadline(fetchUsage(), REFRESH_TIMEOUT_MS)
       if (disposed) return
+
+      if (!result) {
+        setStatus({ kind: "error", message: "request timed out" })
+        return
+      }
+
       setStatus(result.ok ? { kind: "ready", usage: result.usage } : { kind: "error", message: result.error })
-    } catch (error) {
+    } catch {
       if (disposed) return
-      setStatus({ kind: "error", message: String(error).slice(0, 80) })
+      setStatus({ kind: "error", message: "unexpected error" })
+    } finally {
+      refreshing = false
     }
   }
 
