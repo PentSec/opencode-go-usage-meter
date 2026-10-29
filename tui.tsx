@@ -6,7 +6,7 @@
  */
 import { Plugin } from "@opencode/plugin/tui"
 import type { RGBA } from "@opentui/core"
-import { createSignal, onCleanup, onMount } from "solid-js"
+import { createSignal, onCleanup, onMount, Show } from "solid-js"
 import { bar, remaining, severity, type Severity } from "./src/format.ts"
 import { clampPercent, fetchUsage, type Usage, type UsageWindow, type UsageWindowKind } from "./src/usage.ts"
 
@@ -82,9 +82,14 @@ const Panel = (props: { theme: unknown }) => {
   let disposed = false
 
   const refresh = async () => {
-    const result = await fetchUsage()
-    if (disposed) return
-    setStatus(result.ok ? { kind: "ready", usage: result.usage } : { kind: "error", message: result.error })
+    try {
+      const result = await fetchUsage()
+      if (disposed) return
+      setStatus(result.ok ? { kind: "ready", usage: result.usage } : { kind: "error", message: result.error })
+    } catch (error) {
+      if (disposed) return
+      setStatus({ kind: "error", message: String(error).slice(0, 80) })
+    }
   }
 
   onMount(() => {
@@ -101,24 +106,33 @@ const Panel = (props: { theme: unknown }) => {
   return (
     <box flexDirection="column" width="100%">
       <text fg={palette().muted}>Go usage</text>
-      {(() => {
-        const current = status()
-        if (current.kind === "loading") return <text fg={palette().muted}>{"\u2026"}</text>
-        if (current.kind === "error") return <text fg={palette().danger}>{`\u2717 ${current.message}`}</text>
-
-        return (
+      <Show when={status().kind === "loading"}>
+        <text fg={palette().muted}>{"\u2026"}</text>
+      </Show>
+      <Show
+        when={(() => {
+          const current = status()
+          return current.kind === "error" ? current : undefined
+        })()}
+        keyed
+      >
+        {(failed) => <text fg={palette().danger}>{`\u2717 ${failed.message}`}</text>}
+      </Show>
+      <Show
+        when={(() => {
+          const current = status()
+          return current.kind === "ready" ? current.usage : undefined
+        })()}
+        keyed
+      >
+        {(usage) => (
           <box flexDirection="column" width="100%">
             {ROWS.map((row) => (
-              <Row
-                label={row.label}
-                window={current.usage[row.key]}
-                now={now()}
-                palette={palette()}
-              />
+              <Row label={row.label} window={usage[row.key]} now={now()} palette={palette()} />
             ))}
           </box>
-        )
-      })()}
+        )}
+      </Show>
     </box>
   )
 }
