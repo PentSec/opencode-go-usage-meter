@@ -16,6 +16,9 @@
     "README.md",
     "LICENSE"
   ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "keywords": [
     "opencode",
     "opencode-plugin",
@@ -34,7 +37,8 @@
   },
   "homepage": "https://github.com/PentSec/opencode-go-usage-meter#readme",
   "devDependencies": {
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@opencode/plugin": "latest"
