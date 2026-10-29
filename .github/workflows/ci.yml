@@ -1,0 +1,43 @@
+name: ci
+
+# Typecheck gate for pull requests and for main.
+#
+# The package ships TypeScript sources (`index.ts`, `tui.tsx`, `src/`) that
+# OpenCode compiles when it loads the plugin, so a type error is a runtime
+# failure for users rather than a build error. There is no build step to catch
+# it, which makes this workflow the only check between a broken type and a
+# published release.
+#
+# `npm ci` needs `package-lock.json` committed; it is the single source of the
+# dependency tree that gets published.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
