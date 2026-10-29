@@ -41,7 +41,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@opencode/plugin": "latest"
+    "@opencode/plugin": "^2.1.1"
   },
   "peerDependencies": {
     "@opentui/core": ">=0.6.6",
