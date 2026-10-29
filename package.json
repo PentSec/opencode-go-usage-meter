@@ -1,6 +1,6 @@
 {
   "name": "opencode-go-usage-meter",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OpenCode Go subscription usage bars (rolling, weekly, monthly) in the OpenCode v2 TUI sidebar.",
   "author": "PentSec",
   "license": "MIT",
