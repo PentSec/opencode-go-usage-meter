@@ -8,6 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import type { Plugin } from "@opencode/plugin/tui"
+import type { Usage } from "../src/usage.ts"
 import { testRender } from "@opentui/solid"
 
 const BASE = Date.parse("2030-01-01T00:00:00Z")
@@ -81,7 +82,7 @@ function fakeHost() {
 function usage(
   percent: { rolling: number; weekly: number; monthly: number },
   withResets = true,
-): { usage: Record<string, { percent: number; resetsAt?: string }> } {
+): { usage: Usage } {
   const half = (seconds: number) => new Date(BASE + (seconds * 1000) / 2).toISOString()
 
   return {

@@ -20,9 +20,10 @@ import { join } from "node:path"
  * checked after `opencode-go` in both stores.
  *
  * A provider entry can be an API key or an OAuth entry. An OAuth entry
- * contributes its `access` token only while the entry has not expired, because
- * the token is short-lived and a stale one is rejected by the usage endpoint.
- * The caller tries the candidates in order and moves on when one is rejected.
+ * contributes its `access` token unless it carries a numeric expiry that is
+ * already past; an entry with no usable expiry is tried, because a stale token
+ * only costs one rejected request. The caller tries the candidates in order and
+ * moves on when one is rejected.
  */
 
 /** Provider ids to check, in priority order. */
@@ -73,7 +74,8 @@ export function extractCredential(value: unknown, now: number = Date.now()): str
   return undefined
 }
 
-async function fromEnvironment(): Promise<string | undefined> {
+/** Environment override, when it is set and non-empty. */
+export async function resolveEnvironmentKey(): Promise<string | undefined> {
   const value = process.env.OPENCODE_GO_API_KEY
   return value && value.length > 0 ? value : undefined
 }
@@ -101,7 +103,15 @@ async function fromDatabase(directory: string): Promise<string[]> {
       const row = statement.get(providerID) as { value?: string } | null
       if (!row?.value) continue
 
-      const credential = extractCredential(JSON.parse(row.value))
+      // One unreadable row must not discard the rows already collected.
+      let value: unknown
+      try {
+        value = JSON.parse(row.value)
+      } catch {
+        continue
+      }
+
+      const credential = extractCredential(value)
       if (credential) found.push(credential)
     }
 
@@ -135,6 +145,22 @@ async function fromAuthFile(directory: string): Promise<string[]> {
 }
 
 /**
+ * Resolve the stored credentials, database before `auth.json` for each data
+ * directory. Deduplicated, in priority order.
+ *
+ * Keeping this separate from the environment key lets the caller avoid touching
+ * the stores at all while the environment key still works.
+ */
+export async function resolveStoredApiKeys(directories: string[] = dataDirectories()): Promise<string[]> {
+  const candidates: string[] = []
+
+  for (const directory of directories) candidates.push(...(await fromDatabase(directory)))
+  for (const directory of directories) candidates.push(...(await fromAuthFile(directory)))
+
+  return [...new Set(candidates)]
+}
+
+/**
  * Resolve every usable credential, most authoritative first.
  *
  * Order: environment, then the database for each data directory, then
@@ -144,11 +170,9 @@ async function fromAuthFile(directory: string): Promise<string[]> {
 export async function resolveApiKeys(directories: string[] = dataDirectories()): Promise<string[]> {
   const candidates: string[] = []
 
-  const fromEnv = await fromEnvironment()
+  const fromEnv = await resolveEnvironmentKey()
   if (fromEnv) candidates.push(fromEnv)
-
-  for (const directory of directories) candidates.push(...(await fromDatabase(directory)))
-  for (const directory of directories) candidates.push(...(await fromAuthFile(directory)))
+  candidates.push(...(await resolveStoredApiKeys(directories)))
 
   return [...new Set(candidates)]
 }

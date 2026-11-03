@@ -115,15 +115,21 @@ returns `401 api_key_expired`.
 
 The resolver accepts the first non-empty string in `key`, `apiKey`, `access` or
 `token`, and also accepts an array of entries (older layouts). An entry marked
-`type: "oauth"` contributes its `access` token only while its `expires`
-timestamp is in the future, so a short-lived Console token is usable and a
-stale one is skipped.
+`type: "oauth"` contributes its `access` token. When the entry carries a numeric
+`expires` timestamp that is already past, the token is skipped; an entry with no
+usable expiry is tried, and a rejected one costs a single request before the
+next candidate.
+
+The environment variable is tried first and the stored credentials are only read
+when it is absent or rejected, so a working environment key never opens the
+database or `auth.json`.
 
 The plugin does not test a credential in advance. It tries the candidates in the
 order above and moves to the next one only when the endpoint returns HTTP 401.
 Any other outcome stops the chain, because a network error, a rate limit or a
 malformed response would not improve with another credential. Once a credential
-works, later polls try it first.
+works, later polls try it first, and a credential rejected by every poll stops
+being preferred.
 
 When every candidate is rejected the panel shows `credential rejected`; when
 the list is empty it shows `no credential found`.

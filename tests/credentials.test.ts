@@ -11,7 +11,9 @@ const temporaryDirectories: string[] = []
 
 type CredentialRow = {
   integrationId: string
-  value: unknown
+  value?: unknown
+  /** Raw column text, used to store unparseable JSON. */
+  raw?: string
   active?: boolean | null
 }
 
@@ -44,7 +46,11 @@ function writeDatabase(directory: string, rows: CredentialRow[]): void {
     database.run("create table credential (integration_id text not null, value text not null, active integer)")
     const insert = database.query("insert into credential (integration_id, value, active) values (?, ?, ?)")
     for (const row of rows) {
-      insert.run(row.integrationId, JSON.stringify(row.value), row.active === undefined ? 1 : row.active === null ? null : row.active ? 1 : 0)
+      insert.run(
+        row.integrationId,
+        row.raw ?? JSON.stringify(row.value),
+        row.active === undefined ? 1 : row.active === null ? null : row.active ? 1 : 0,
+      )
     }
   } finally {
     database.close()
@@ -80,6 +86,10 @@ describe("extractCredential", () => {
 
   test("skips an expired OAuth entry", () => {
     expect(extractCredential({ type: "oauth", access: "oauth-token", expires: Date.now() - 1_000 })).toBeUndefined()
+  })
+
+  test("treats a non-numeric expires as no expiry", () => {
+    expect(extractCredential({ type: "oauth", access: "oauth-token", expires: "tomorrow" })).toBe("oauth-token")
   })
 
   test("skips an OAuth entry without an access token", () => {
@@ -255,6 +265,26 @@ describe("resolveApiKey", () => {
     ])
 
     expect(await resolveApiKey([directory])).toBe("go-database")
+  })
+
+  test("keeps an earlier row when a later row is unparseable", async () => {
+    const directory = await makeDirectory()
+    writeDatabase(directory, [
+      { integrationId: "opencode-go", value: { key: "good-key" } },
+      { integrationId: "opencode", raw: "not-json" },
+    ])
+
+    expect(await resolveApiKey([directory])).toBe("good-key")
+  })
+
+  test("continues past an unparseable row to the next provider", async () => {
+    const directory = await makeDirectory()
+    writeDatabase(directory, [
+      { integrationId: "opencode-go", raw: "{broken" },
+      { integrationId: "opencode", value: { key: "fallback-key" } },
+    ])
+
+    expect(await resolveApiKey([directory])).toBe("fallback-key")
   })
 
   test("returns undefined when the stores are missing", async () => {

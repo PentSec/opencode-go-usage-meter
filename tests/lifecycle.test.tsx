@@ -77,11 +77,17 @@ async function startPlugin() {
 async function mount(claim: Claim) {
   const view = await testRender(() => claim.render({ sessionID: "session" }) as any, { width: 60, height: 10 })
   await view.flush()
+  await waitForLoads(1)
   return view
 }
 
 async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/** Wait until the plugin registered `count` loads, instead of assuming timing. */
+async function waitForLoads(count: number) {
+  for (let attempt = 0; attempt < 50 && loads.length < count; attempt += 1) await settle()
 }
 
 function ready(percent: number): Response {

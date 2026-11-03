@@ -1,4 +1,4 @@
-import { resolveApiKeys } from "./credentials.ts"
+import { resolveEnvironmentKey, resolveStoredApiKeys } from "./credentials.ts"
 
 /** Official OpenCode Go usage endpoint, as used by the web console. */
 export const USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
@@ -103,6 +103,28 @@ async function attemptUsage(key: string): Promise<Attempt> {
 }
 
 /**
+ * Yield candidates lazily: the environment key first, and the stored credentials
+ * only when the consumer asks for another attempt. A working environment key
+ * therefore never touches the credential database or `auth.json`.
+ */
+async function* candidateKeys(directories: string[] | undefined): AsyncGenerator<string> {
+  const seen = new Set<string>()
+
+  const environment = await resolveEnvironmentKey()
+  if (environment) {
+    seen.add(environment)
+    yield environment
+  }
+
+  for (const key of orderCandidates(await resolveStoredApiKeys(directories))) {
+    if (seen.has(key)) continue
+
+    seen.add(key)
+    yield key
+  }
+}
+
+/**
  * Fetch the three usage windows for the current account.
  *
  * Candidates are tried in order and a rejected one falls through to the next,
@@ -111,14 +133,15 @@ async function attemptUsage(key: string): Promise<Attempt> {
  * rate limit or the response shape.
  */
 export async function fetchUsage(directories?: string[]): Promise<UsageResult> {
-  const candidates = orderCandidates(await resolveApiKeys(directories))
-  if (candidates.length === 0) return { ok: false, error: "no credential found" }
+  let attempted = 0
 
-  let rejected = false
-  for (const key of candidates) {
+  for await (const key of candidateKeys(directories)) {
+    attempted += 1
     const attempt = await attemptUsage(key)
+
     if (attempt.kind === "rejected") {
-      rejected = true
+      // A rejected key must not stay preferred for the next poll.
+      if (key === lastWorkingKey) lastWorkingKey = undefined
       continue
     }
 
@@ -126,5 +149,5 @@ export async function fetchUsage(directories?: string[]): Promise<UsageResult> {
     return attempt.result
   }
 
-  return rejected ? { ok: false, error: "credential rejected" } : { ok: false, error: "no credential found" }
+  return attempted === 0 ? { ok: false, error: "no credential found" } : { ok: false, error: "credential rejected" }
 }
