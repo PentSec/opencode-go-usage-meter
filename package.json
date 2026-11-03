@@ -17,6 +17,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

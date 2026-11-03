@@ -8,14 +8,20 @@ import { join } from "node:path"
  * Order:
  *   1. `OPENCODE_GO_API_KEY` environment variable.
  *   2. The active `opencode-go` credential in OpenCode's local database.
- *   3. The `opencode-go` entry in `auth.json` (legacy layout).
+ *   3. The active `opencode` (OpenCode Console) credential in the same database.
+ *   4. The `opencode-go` entry in `auth.json` (legacy layout).
+ *   5. The `opencode` (OpenCode Console) entry in `auth.json`.
  *
- * The database is the authoritative source in current OpenCode builds: a key
- * that was rotated or re-issued through the Console shows up there first, while
- * `auth.json` may still hold an expired copy.
+ * The database is checked before `auth.json` because it holds the credential
+ * that OpenCode currently uses for the provider, while `auth.json` may still
+ * hold an expired copy.
+ *
+ * `opencode` is the provider id of the OpenCode Console integration. It is
+ * checked after `opencode-go` in both stores.
  */
 
-const PROVIDER_ID = "opencode-go"
+/** Provider ids to check, in priority order. */
+const PROVIDER_IDS = ["opencode-go", "opencode"] as const
 
 /** Candidate OpenCode data directories, most specific first. */
 export function dataDirectories(): string[] {
@@ -45,6 +51,9 @@ export function extractCredential(value: unknown): string | undefined {
   }
 
   const entry = value as Record<string, unknown>
+  // OAuth entries carry short-lived access tokens, not API keys.
+  if (entry.type === "oauth") return undefined
+
   for (const field of ["key", "apiKey", "access", "token"]) {
     const candidate = entry[field]
     if (typeof candidate === "string" && candidate.length > 0) return candidate
@@ -68,12 +77,17 @@ async function fromDatabase(directory: string): Promise<string | undefined> {
   let db: import("bun:sqlite").Database | undefined
   try {
     db = new Database(join(directory, "opencode.db"), { readonly: true })
-    const row = db
-      .query("select value from credential where integration_id = ? and active = 1 limit 1")
-      .get(PROVIDER_ID) as { value?: string } | null
+    const statement = db.query("select value from credential where integration_id = ? and active = 1 limit 1")
 
-    if (!row?.value) return undefined
-    return extractCredential(JSON.parse(row.value))
+    for (const providerID of PROVIDER_IDS) {
+      const row = statement.get(providerID) as { value?: string } | null
+      if (!row?.value) continue
+
+      const credential = extractCredential(JSON.parse(row.value))
+      if (credential) return credential
+    }
+
+    return undefined
   } catch {
     return undefined
   } finally {
@@ -89,7 +103,13 @@ async function fromAuthFile(directory: string): Promise<string | undefined> {
   try {
     const raw = await readFile(join(directory, "auth.json"), "utf8")
     const store = JSON.parse(raw) as Record<string, unknown>
-    return extractCredential(store[PROVIDER_ID])
+
+    for (const providerID of PROVIDER_IDS) {
+      const credential = extractCredential(store[providerID])
+      if (credential) return credential
+    }
+
+    return undefined
   } catch {
     return undefined
   }

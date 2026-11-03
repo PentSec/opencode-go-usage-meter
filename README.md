@@ -80,11 +80,20 @@ In order:
 1. `OPENCODE_GO_API_KEY` environment variable.
 2. The active `opencode-go` credential in OpenCode's local database
    (`credential` table).
-3. The `opencode-go` entry in `auth.json` (legacy layout).
+3. The active `opencode` (OpenCode Console) credential in the same database.
+4. The `opencode-go` entry in `auth.json` (legacy layout).
+5. The `opencode` (OpenCode Console) entry in `auth.json`.
 
-The database is checked first on purpose. Current OpenCode builds keep the live
-credential there, and `auth.json` can still hold an expired copy, which returns
-`401 api_key_expired`.
+Within each store, the resolver checks `opencode-go` before `opencode`. It checks
+the database before `auth.json` because that is where OpenCode keeps the
+credential it currently uses; `auth.json` can still hold an expired copy, which
+returns `401 api_key_expired`.
+
+The resolver accepts the first non-empty string in `key`, `apiKey`, `access` or
+`token`, and also accepts an array of entries (older layouts). It skips entries
+with `type: "oauth"`, because it returns only an API-key style credential, not
+an OAuth access token. It does not test a candidate against the usage endpoint.
+If the endpoint returns HTTP 401, the plugin shows `credential rejected`.
 
 ## Troubleshooting
 
