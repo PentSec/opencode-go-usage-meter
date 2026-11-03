@@ -17,7 +17,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --preload @opentui/solid/preload tests"
   },
   "keywords": [
     "opencode",
