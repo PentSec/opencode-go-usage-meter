@@ -2,15 +2,13 @@
 /**
  * Renderer checks for the sidebar layout.
  *
- * The plugin module is imported after `fetchUsage` is mocked, so no test reads
- * credentials or calls the usage API. A fake host records the sidebar slot
- * claim, and the real OpenTUI test renderer mounts it.
+ * Each test sets the environment credential and mocks `fetch`, so no test reads
+ * the real credential stores or calls the usage API. A fake host records the
+ * sidebar slot claim, and the real OpenTUI test renderer mounts it.
  */
-import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import type { Plugin } from "@opencode/plugin/tui"
 import { testRender } from "@opentui/solid"
-import * as usageModule from "../src/usage.ts"
-import type { UsageResult } from "../src/usage.ts"
 
 const BASE = Date.parse("2030-01-01T00:00:00Z")
 const POLL_MS = 60_000
@@ -22,16 +20,11 @@ const CLOCK_MS = 30_000
  */
 const MONTHLY_RESET = "2030-01-16T12:00:00.000Z"
 
-let nextResult: UsageResult
+/** Payload the mocked `fetch` answers with on the next load. */
+let nextPayload: unknown
 
-mock.module("../src/usage.ts", () => ({
-  ...usageModule,
-  fetchUsage: async () => nextResult,
-}))
-
-afterAll(() => {
-  mock.restore()
-})
+/** Set the environment credential so no test reads the real credential stores. */
+const initialApiKey = process.env.OPENCODE_GO_API_KEY
 
 const { default: plugin } = await import("../tui.tsx")
 
@@ -53,6 +46,7 @@ const realClearInterval = globalThis.clearInterval
 
 let intervalSpy: ReturnType<typeof spyOn>
 let clearSpy: ReturnType<typeof spyOn>
+let fetchSpy: ReturnType<typeof spyOn>
 let nowSpy: ReturnType<typeof spyOn>
 
 const THEME = {
@@ -87,11 +81,10 @@ function fakeHost() {
 function usage(
   percent: { rolling: number; weekly: number; monthly: number },
   withResets = true,
-): UsageResult {
+): { usage: Record<string, { percent: number; resetsAt?: string }> } {
   const half = (seconds: number) => new Date(BASE + (seconds * 1000) / 2).toISOString()
 
   return {
-    ok: true,
     usage: {
       rolling: { percent: percent.rolling, resetsAt: withResets ? half(5 * 3_600) : undefined },
       weekly: { percent: percent.weekly, resetsAt: withResets ? half(7 * 86_400) : undefined },
@@ -100,8 +93,8 @@ function usage(
   }
 }
 
-async function mount(result: UsageResult) {
-  nextResult = result
+async function mount(payload: ReturnType<typeof usage>) {
+  nextPayload = payload
   const host = fakeHost()
   const cleanup = (await plugin.setup(host.context)) as (() => void) | undefined
   // Register the setup cleanup before any assertion, so a failing mount still
@@ -139,7 +132,11 @@ function fillCount(line: string): number {
 beforeEach(() => {
   schedules.length = 0
   cleared = []
-  nextResult = usage({ rolling: 0, weekly: 0, monthly: 0 })
+  process.env.OPENCODE_GO_API_KEY = "test-key"
+  nextPayload = usage({ rolling: 0, weekly: 0, monthly: 0 })
+  fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => {
+    return new Response(JSON.stringify(nextPayload), { status: 200 })
+  }) as unknown as typeof fetch)
   nowSpy = spyOn(Date, "now").mockReturnValue(BASE)
   intervalSpy = spyOn(globalThis, "setInterval").mockImplementation(((callback: () => void, ms?: number) => {
     const id = realSetInterval(callback, ms)
@@ -164,7 +161,11 @@ afterEach(async () => {
       for (const entry of schedules) realClearInterval(entry.id)
       intervalSpy.mockRestore()
       clearSpy.mockRestore()
+      fetchSpy.mockRestore()
       nowSpy.mockRestore()
+
+      if (initialApiKey === undefined) delete process.env.OPENCODE_GO_API_KEY
+      else process.env.OPENCODE_GO_API_KEY = initialApiKey
 
       if (leaked.length > 0) {
         throw new Error(`setup cleanup left ${leaked.length} interval(s) running`)

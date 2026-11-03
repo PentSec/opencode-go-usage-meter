@@ -6,11 +6,9 @@
  * function, dispose it, and mount the same claim again. The real OpenTUI test
  * renderer provides the Solid root for each mount.
  */
-import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import type { Plugin } from "@opencode/plugin/tui"
 import { testRender } from "@opentui/solid"
-import * as usageModule from "../src/usage.ts"
-import type { UsageResult } from "../src/usage.ts"
 
 const POLL_MS = 60_000
 const CLOCK_MS = 30_000
@@ -34,20 +32,14 @@ function deferred<Value>(): Deferred<Value> {
 
 type Scheduled = { id: ReturnType<typeof setInterval>; run: () => void; ms: number }
 
-const loads: Deferred<UsageResult>[] = []
+const loads: Deferred<Response>[] = []
 
-mock.module("../src/usage.ts", () => ({
-  ...usageModule,
-  fetchUsage: () => {
-    const load = deferred<UsageResult>()
-    loads.push(load)
-    return load.promise
-  },
-}))
+/** Set the environment credential so no test reads the real credential stores. */
+const initialApiKey = process.env.OPENCODE_GO_API_KEY
 
-afterAll(() => {
-  mock.restore()
-})
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status })
+}
 
 const { default: plugin } = await import("../tui.tsx")
 
@@ -92,21 +84,21 @@ async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-function ready(percent: number): UsageResult {
-  return {
-    ok: true,
+function ready(percent: number): Response {
+  return json(200, {
     usage: {
       rolling: { percent, resetsAt: new Date(Date.now() + 3_600_000).toISOString() },
       weekly: { percent: 10 },
       monthly: { percent: 5 },
     },
-  }
+  })
 }
 
 let schedules: Scheduled[] = []
 let cleared: Array<ReturnType<typeof setInterval>> = []
 let intervalSpy: ReturnType<typeof spyOn>
 let clearSpy: ReturnType<typeof spyOn>
+let fetchSpy: ReturnType<typeof spyOn>
 let dateSpy: ReturnType<typeof spyOn> | undefined
 
 const realSetInterval = globalThis.setInterval
@@ -116,6 +108,13 @@ beforeEach(() => {
   loads.length = 0
   schedules = []
   cleared = []
+  process.env.OPENCODE_GO_API_KEY = "test-key"
+
+  fetchSpy = spyOn(globalThis, "fetch").mockImplementation((() => {
+    const load = deferred<Response>()
+    loads.push(load)
+    return load.promise
+  }) as unknown as typeof fetch)
 
   intervalSpy = spyOn(globalThis, "setInterval").mockImplementation(((callback: () => void, ms?: number) => {
     const id = realSetInterval(callback, ms)
@@ -133,8 +132,12 @@ afterEach(() => {
   for (const entry of schedules) realClearInterval(entry.id)
   dateSpy?.mockRestore()
   dateSpy = undefined
+  fetchSpy.mockRestore()
   clearSpy.mockRestore()
   intervalSpy.mockRestore()
+
+  if (initialApiKey === undefined) delete process.env.OPENCODE_GO_API_KEY
+  else process.env.OPENCODE_GO_API_KEY = initialApiKey
 })
 
 const polls = () => schedules.filter((entry) => entry.ms === POLL_MS)
@@ -176,7 +179,7 @@ describe("panel lifecycle", () => {
     const host = await startPlugin()
     const first = await mount(host.claims[0]!)
 
-    loads[0]!.resolve({ ok: false, error: "rate limited" })
+    loads[0]!.resolve(json(429, {}))
     await settle()
     await first.flush()
     expect(first.captureCharFrame(), "error visible before the panel remount").toContain("rate limited")
@@ -201,14 +204,15 @@ describe("panel lifecycle", () => {
     const base = Date.parse("2030-01-01T00:00:00Z")
 
     dateSpy = spyOn(Date, "now").mockReturnValue(base)
-    loads[0]!.resolve({
-      ok: true,
-      usage: {
-        rolling: { percent: 42, resetsAt: new Date(base + 3_600_000).toISOString() },
-        weekly: { percent: 10 },
-        monthly: { percent: 5 },
-      },
-    })
+    loads[0]!.resolve(
+      json(200, {
+        usage: {
+          rolling: { percent: 42, resetsAt: new Date(base + 3_600_000).toISOString() },
+          weekly: { percent: 10 },
+          monthly: { percent: 5 },
+        },
+      }),
+    )
     await settle()
     await first.flush()
     clocks()[0]!.run()

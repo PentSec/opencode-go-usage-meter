@@ -1,4 +1,4 @@
-import { resolveApiKey } from "./credentials.ts"
+import { resolveApiKeys } from "./credentials.ts"
 
 /** Official OpenCode Go usage endpoint, as used by the web console. */
 export const USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
@@ -52,11 +52,27 @@ export function parseUsage(payload: unknown): Usage | undefined {
   return { rolling, weekly, monthly }
 }
 
-/** Fetch the three usage windows for the current account. */
-export async function fetchUsage(): Promise<UsageResult> {
-  const key = await resolveApiKey()
-  if (!key) return { ok: false, error: "no credential found" }
+/** One credential attempt: either a settled result or a rejected credential. */
+type Attempt = { kind: "ready"; result: UsageResult } | { kind: "rejected" }
 
+/** Credential that produced the last non-rejected response, tried first later. */
+let lastWorkingKey: string | undefined
+
+/**
+ * Move the last working credential to the front, so a stale candidate does not
+ * cost a rejected request on every poll.
+ */
+function orderCandidates(candidates: string[]): string[] {
+  if (lastWorkingKey === undefined) return candidates
+
+  const index = candidates.indexOf(lastWorkingKey)
+  if (index <= 0) return candidates
+
+  return [lastWorkingKey, ...candidates.filter((candidate) => candidate !== lastWorkingKey)]
+}
+
+/** Try one credential. Only a 401 means the credential itself is wrong. */
+async function attemptUsage(key: string): Promise<Attempt> {
   let response: Response
   try {
     response = await fetch(USAGE_URL, {
@@ -65,22 +81,50 @@ export async function fetchUsage(): Promise<UsageResult> {
     })
   } catch (error) {
     const name = (error as { name?: string } | undefined)?.name
-    return { ok: false, error: name === "TimeoutError" ? "request timed out" : "network error" }
+    const message = name === "TimeoutError" ? "request timed out" : "network error"
+    return { kind: "ready", result: { ok: false, error: message } }
   }
 
-  if (response.status === 401) return { ok: false, error: "credential rejected" }
-  if (response.status === 429) return { ok: false, error: "rate limited" }
-  if (!response.ok) return { ok: false, error: `HTTP ${response.status}` }
+  if (response.status === 401) return { kind: "rejected" }
+  if (response.status === 429) return { kind: "ready", result: { ok: false, error: "rate limited" } }
+  if (!response.ok) return { kind: "ready", result: { ok: false, error: `HTTP ${response.status}` } }
 
   let payload: unknown
   try {
     payload = await response.json()
   } catch {
-    return { ok: false, error: "invalid response" }
+    return { kind: "ready", result: { ok: false, error: "invalid response" } }
   }
 
   const usage = parseUsage(payload)
-  if (!usage) return { ok: false, error: "unexpected response" }
+  if (!usage) return { kind: "ready", result: { ok: false, error: "unexpected response" } }
 
-  return { ok: true, usage }
+  return { kind: "ready", result: { ok: true, usage } }
+}
+
+/**
+ * Fetch the three usage windows for the current account.
+ *
+ * Candidates are tried in order and a rejected one falls through to the next,
+ * so a stale OAuth token cannot hide a working API key. Any other outcome stops
+ * the chain: retrying with another credential would not fix the network, the
+ * rate limit or the response shape.
+ */
+export async function fetchUsage(directories?: string[]): Promise<UsageResult> {
+  const candidates = orderCandidates(await resolveApiKeys(directories))
+  if (candidates.length === 0) return { ok: false, error: "no credential found" }
+
+  let rejected = false
+  for (const key of candidates) {
+    const attempt = await attemptUsage(key)
+    if (attempt.kind === "rejected") {
+      rejected = true
+      continue
+    }
+
+    lastWorkingKey = key
+    return attempt.result
+  }
+
+  return rejected ? { ok: false, error: "credential rejected" } : { ok: false, error: "no credential found" }
 }

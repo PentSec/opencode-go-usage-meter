@@ -18,6 +18,11 @@ import { join } from "node:path"
  *
  * `opencode` is the provider id of the OpenCode Console integration. It is
  * checked after `opencode-go` in both stores.
+ *
+ * A provider entry can be an API key or an OAuth entry. An OAuth entry
+ * contributes its `access` token only while the entry has not expired, because
+ * the token is short-lived and a stale one is rejected by the usage endpoint.
+ * The caller tries the candidates in order and moves on when one is rejected.
  */
 
 /** Provider ids to check, in priority order. */
@@ -38,21 +43,28 @@ export function dataDirectories(): string[] {
 }
 
 /** Pull the first usable credential string out of an auth store entry. */
-export function extractCredential(value: unknown): string | undefined {
+export function extractCredential(value: unknown, now: number = Date.now()): string | undefined {
   if (!value || typeof value !== "object") return undefined
 
   // Older layouts can store several accounts for one provider.
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = extractCredential(item)
+      const found = extractCredential(item, now)
       if (found) return found
     }
     return undefined
   }
 
   const entry = value as Record<string, unknown>
-  // OAuth entries carry short-lived access tokens, not API keys.
-  if (entry.type === "oauth") return undefined
+  if (entry.type === "oauth") {
+    // Short-lived tokens are usable until they expire, and a stale one only
+    // costs a rejected request.
+    const expires = entry.expires
+    if (typeof expires === "number" && Number.isFinite(expires) && expires <= now) return undefined
+
+    const access = entry.access
+    return typeof access === "string" && access.length > 0 ? access : undefined
+  }
 
   for (const field of ["key", "apiKey", "access", "token"]) {
     const candidate = entry[field]
@@ -66,12 +78,12 @@ async function fromEnvironment(): Promise<string | undefined> {
   return value && value.length > 0 ? value : undefined
 }
 
-async function fromDatabase(directory: string): Promise<string | undefined> {
+async function fromDatabase(directory: string): Promise<string[]> {
   let Database: typeof import("bun:sqlite").Database
   try {
     ;({ Database } = await import("bun:sqlite"))
   } catch {
-    return undefined
+    return []
   }
 
   let db: import("bun:sqlite").Database | undefined
@@ -80,20 +92,22 @@ async function fromDatabase(directory: string): Promise<string | undefined> {
     // `active` is nullable with no default. Legacy rows store NULL, which means
     // the credential is active; an explicit 1 wins when both shapes coexist.
     const statement = db.query(
-      "select value from credential where integration_id = ? and coalesce(active, 1) = 1 order by (active is 1) desc limit 1",
+      "select value from credential where integration_id = ? and coalesce(active, 1) = 1 " +
+        "order by (active is 1) desc limit 1",
     )
 
+    const found: string[] = []
     for (const providerID of PROVIDER_IDS) {
       const row = statement.get(providerID) as { value?: string } | null
       if (!row?.value) continue
 
       const credential = extractCredential(JSON.parse(row.value))
-      if (credential) return credential
+      if (credential) found.push(credential)
     }
 
-    return undefined
+    return found
   } catch {
-    return undefined
+    return []
   } finally {
     try {
       db?.close()
@@ -103,36 +117,43 @@ async function fromDatabase(directory: string): Promise<string | undefined> {
   }
 }
 
-async function fromAuthFile(directory: string): Promise<string | undefined> {
+async function fromAuthFile(directory: string): Promise<string[]> {
   try {
     const raw = await readFile(join(directory, "auth.json"), "utf8")
     const store = JSON.parse(raw) as Record<string, unknown>
 
+    const found: string[] = []
     for (const providerID of PROVIDER_IDS) {
       const credential = extractCredential(store[providerID])
-      if (credential) return credential
+      if (credential) found.push(credential)
     }
 
-    return undefined
+    return found
   } catch {
-    return undefined
+    return []
   }
 }
 
-/** Resolve an OpenCode Go API key, or `undefined` when none is available. */
-export async function resolveApiKey(directories: string[] = dataDirectories()): Promise<string | undefined> {
+/**
+ * Resolve every usable credential, most authoritative first.
+ *
+ * Order: environment, then the database for each data directory, then
+ * `auth.json` for each data directory. Duplicates are removed, so a key stored
+ * in both places is tried once.
+ */
+export async function resolveApiKeys(directories: string[] = dataDirectories()): Promise<string[]> {
+  const candidates: string[] = []
+
   const fromEnv = await fromEnvironment()
-  if (fromEnv) return fromEnv
+  if (fromEnv) candidates.push(fromEnv)
 
-  for (const directory of directories) {
-    const fromDb = await fromDatabase(directory)
-    if (fromDb) return fromDb
-  }
+  for (const directory of directories) candidates.push(...(await fromDatabase(directory)))
+  for (const directory of directories) candidates.push(...(await fromAuthFile(directory)))
 
-  for (const directory of directories) {
-    const fromFile = await fromAuthFile(directory)
-    if (fromFile) return fromFile
-  }
+  return [...new Set(candidates)]
+}
 
-  return undefined
+/** Resolve the first OpenCode Go credential, or `undefined` when none is available. */
+export async function resolveApiKey(directories: string[] = dataDirectories()): Promise<string | undefined> {
+  return (await resolveApiKeys(directories))[0]
 }

@@ -114,10 +114,19 @@ credential it currently uses; `auth.json` can still hold an expired copy, which
 returns `401 api_key_expired`.
 
 The resolver accepts the first non-empty string in `key`, `apiKey`, `access` or
-`token`, and also accepts an array of entries (older layouts). It skips entries
-with `type: "oauth"`, because it returns only an API-key style credential, not
-an OAuth access token. It does not test a candidate against the usage endpoint.
-If the endpoint returns HTTP 401, the plugin shows `credential rejected`.
+`token`, and also accepts an array of entries (older layouts). An entry marked
+`type: "oauth"` contributes its `access` token only while its `expires`
+timestamp is in the future, so a short-lived Console token is usable and a
+stale one is skipped.
+
+The plugin does not test a credential in advance. It tries the candidates in the
+order above and moves to the next one only when the endpoint returns HTTP 401.
+Any other outcome stops the chain, because a network error, a rate limit or a
+malformed response would not improve with another credential. Once a credential
+works, later polls try it first.
+
+When every candidate is rejected the panel shows `credential rejected`; when
+the list is empty it shows `no credential found`.
 
 ## Troubleshooting
 

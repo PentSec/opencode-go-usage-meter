@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { extractCredential, resolveApiKey } from "../src/credentials.ts"
+import { extractCredential, resolveApiKey, resolveApiKeys } from "../src/credentials.ts"
 
 const initialApiKey = process.env.OPENCODE_GO_API_KEY
 const temporaryDirectories: string[] = []
@@ -71,13 +71,28 @@ describe("extractCredential", () => {
     ).toBe("second")
   })
 
-  test("skips OAuth entries even when they carry an access token", () => {
-    expect(extractCredential({ type: "oauth", access: "oauth-token", key: "api-key" })).toBeUndefined()
+  test("reads the access token of an unexpired OAuth entry", () => {
+    expect(extractCredential({ type: "oauth", access: "oauth-token", expires: Date.now() + 60_000 })).toBe(
+      "oauth-token",
+    )
+    expect(extractCredential({ type: "oauth", access: "oauth-token" })).toBe("oauth-token")
   })
 
-  test("skips OAuth entries inside arrays", () => {
+  test("skips an expired OAuth entry", () => {
+    expect(extractCredential({ type: "oauth", access: "oauth-token", expires: Date.now() - 1_000 })).toBeUndefined()
+  })
+
+  test("skips an OAuth entry without an access token", () => {
+    expect(extractCredential({ type: "oauth", refresh: "refresh-token" })).toBeUndefined()
+    expect(extractCredential({ type: "oauth", access: "" })).toBeUndefined()
+  })
+
+  test("continues past an expired OAuth entry inside arrays", () => {
     expect(
-      extractCredential([{ type: "oauth", access: "oauth-token" }, { key: "api-key" }]),
+      extractCredential([
+        { type: "oauth", access: "expired", expires: Date.now() - 1_000 },
+        { key: "api-key" },
+      ]),
     ).toBe("api-key")
   })
 
@@ -138,10 +153,10 @@ describe("resolveApiKey", () => {
     expect(await resolveApiKey([directory])).toBe("active-console-key")
   })
 
-  test("skips OAuth database entries and continues to the next provider", async () => {
+  test("skips an expired OAuth database entry and continues to the next provider", async () => {
     const directory = await makeDirectory()
     writeDatabase(directory, [
-      { integrationId: "opencode-go", value: { type: "oauth", access: "oauth-token" } },
+      { integrationId: "opencode-go", value: { type: "oauth", access: "oauth-token", expires: Date.now() - 1_000 } },
       { integrationId: "opencode", value: { key: "console-key" } },
     ])
 
@@ -197,14 +212,49 @@ describe("resolveApiKey", () => {
     expect(await resolveApiKey([directory])).toBe("auth-go-key")
   })
 
-  test("skips OAuth auth.json entries and continues to the next provider", async () => {
+  test("skips an expired OAuth auth.json entry and continues to the next provider", async () => {
     const directory = await makeDirectory()
     await writeAuthFile(directory, {
-      "opencode-go": { type: "oauth", access: "oauth-token" },
+      "opencode-go": { type: "oauth", access: "oauth-token", expires: Date.now() - 1_000 },
       opencode: { key: "auth-console-key" },
     })
 
     expect(await resolveApiKey([directory])).toBe("auth-console-key")
+  })
+
+  test("orders candidates as environment, database, then auth.json", async () => {
+    const directory = await makeDirectory()
+    writeDatabase(directory, [
+      { integrationId: "opencode-go", value: { key: "go-database" } },
+      { integrationId: "opencode", value: { type: "oauth", access: "console-oauth", expires: Date.now() + 60_000 } },
+    ])
+    await writeAuthFile(directory, { opencode: { key: "console-auth" } })
+    process.env.OPENCODE_GO_API_KEY = "environment-key"
+
+    expect(await resolveApiKeys([directory])).toEqual([
+      "environment-key",
+      "go-database",
+      "console-oauth",
+      "console-auth",
+    ])
+  })
+
+  test("removes duplicate candidates", async () => {
+    const directory = await makeDirectory()
+    writeDatabase(directory, [{ integrationId: "opencode-go", value: { key: "same-key" } }])
+    await writeAuthFile(directory, { "opencode-go": { key: "same-key" } })
+
+    expect(await resolveApiKeys([directory])).toEqual(["same-key"])
+  })
+
+  test("resolveApiKey returns the first candidate", async () => {
+    const directory = await makeDirectory()
+    writeDatabase(directory, [
+      { integrationId: "opencode-go", value: { key: "go-database" } },
+      { integrationId: "opencode", value: { key: "console-database" } },
+    ])
+
+    expect(await resolveApiKey([directory])).toBe("go-database")
   })
 
   test("returns undefined when the stores are missing", async () => {
