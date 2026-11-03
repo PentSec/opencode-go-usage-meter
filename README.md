@@ -25,7 +25,8 @@ Go usage
 One line per window: label, bar, percentage, pace and time until the window
 resets. Columns are fixed width so the rows stay aligned: 3 cells for the
 label, 10 for the bar, 4 for the percentage (100% is the widest) and 7 for the
-pace indicator. Bars turn yellow from 75% and red from 90%.
+pace indicator. Bars turn yellow from 75% and red from 90%. Any non-zero usage
+fills at least one cell, so low usage stays visible; 0% leaves the bar empty.
 
 ### Pace
 

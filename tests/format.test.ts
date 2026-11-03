@@ -45,4 +45,14 @@ describe("changed: fixed ten-cell bar", () => {
     expect(bar(99).filled).toBe("\u2501".repeat(10))
     expect(bar(100).filled).toBe("\u2501".repeat(10))
   })
+
+  test("fills one cell for any non-zero usage below the first cell", () => {
+    for (const percent of [1, 2, 3, 4]) {
+      const segments = bar(percent)
+      expect(segments.filled).toBe("\u2501")
+      expect(segments.empty).toHaveLength(BAR_WIDTH - 1)
+    }
+
+    expect(bar(0).filled).toBe("")
+  })
 })

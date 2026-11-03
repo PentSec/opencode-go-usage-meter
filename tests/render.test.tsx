@@ -366,6 +366,31 @@ describe("severity colors per row", () => {
   })
 })
 
+describe("low usage stays visible", () => {
+  test("draws one colored cell for 2% and 4%, and none for 0%", async () => {
+    const { view } = await mount(usage({ rolling: 2, weekly: 4, monthly: 0 }))
+    const frame = view.captureSpans()
+
+    for (const label of ["5h", "7d"]) {
+      const line = frame.lines.find((entry) =>
+        entry.spans.some((span) => span.text === `${label.padEnd(3)} `),
+      )
+      if (!line) throw new Error(`missing row ${label}`)
+
+      const filled = line.spans.filter((span) => /^\u2501+$/.test(span.text))
+      const colored = filled.find((span) => span.fg.toInts().slice(0, 3).join(",") === "0,255,0")
+      if (!colored) throw new Error(`${label} has no colored filled cell`)
+      expect(colored.text).toHaveLength(1)
+    }
+
+    const monthly = frame.lines.find((entry) =>
+      entry.spans.some((span) => span.text === "1mo "),
+    )
+    if (!monthly) throw new Error("missing row 1mo")
+    expect(monthly.spans.some((span) => /^\u2501+$/.test(span.text))).toBe(false)
+  })
+})
+
 describe("characterization: unchanged poll schedule", () => {
   test("schedules one refresh poll and one clock", async () => {
     await mount(usage({ rolling: 1, weekly: 2, monthly: 3 }))

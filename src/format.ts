@@ -12,7 +12,9 @@ export type Bar = { filled: string; empty: string }
 export function bar(percent: number, width: number = BAR_WIDTH): Bar {
   const clamped = clampPercent(percent)
   const safeWidth = Math.max(1, Math.floor(width))
-  const filled = Math.round((clamped / 100) * safeWidth)
+  // Keep any non-zero usage visible: a ten-cell bar would otherwise stay empty
+  // below 5%, and the row would look uncoloured.
+  const filled = clamped === 0 ? 0 : Math.max(1, Math.round((clamped / 100) * safeWidth))
 
   return {
     filled: FILLED.repeat(filled),
