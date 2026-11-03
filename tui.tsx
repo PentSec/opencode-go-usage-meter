@@ -3,11 +3,16 @@
  * TUI entry: renders the OpenCode Go usage windows in the sidebar footer.
  *
  * See ../README.md for installation and behaviour details.
+ *
+ * State lives in `setup`, not in the component: unmounting and remounting a
+ * slot panel must keep the current usage state and the refresh cycle alive.
+ * The panel reads the signals through accessors.
  */
 import { Plugin } from "@opencode/plugin/tui"
 import type { RGBA } from "@opentui/core"
-import { createSignal, onCleanup, onMount, Show } from "solid-js"
+import { createSignal, Show } from "solid-js"
 import { bar, remaining, severity, type Severity } from "./src/format.ts"
+import { createRefresher } from "./src/refresh.ts"
 import { clampPercent, fetchUsage, type Usage, type UsageWindow, type UsageWindowKind } from "./src/usage.ts"
 
 const POLL_MS = 60_000
@@ -15,23 +20,6 @@ const CLOCK_MS = 30_000
 
 /** Upper bound for a whole refresh cycle, credential lookup included. */
 const REFRESH_TIMEOUT_MS = 15_000
-
-/**
- * Race a promise against a deadline. Resolves `undefined` when the deadline
- * wins, so the caller can tell a timeout apart from a real result.
- */
-async function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const deadline = new Promise<undefined>((resolve) => {
-    timer = setTimeout(() => resolve(undefined), ms)
-  })
-
-  try {
-    return await Promise.race([promise, deadline])
-  } finally {
-    clearTimeout(timer)
-  }
-}
 
 const ROWS: { key: UsageWindowKind; label: string }[] = [
   { key: "rolling", label: "5h" },
@@ -94,56 +82,18 @@ const Row = (props: { label: string; window: UsageWindow; now: number; palette: 
 
 type Status = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; usage: Usage }
 
-const Panel = (props: { theme: unknown }) => {
-  const [status, setStatus] = createSignal<Status>({ kind: "loading" })
-  const [now, setNow] = createSignal(Date.now())
+const Panel = (props: { theme: unknown; status: () => Status; now: () => number }) => {
   const palette = () => paletteOf(props.theme)
-
-  let disposed = false
-  let refreshing = false
-
-  const refresh = async () => {
-    if (refreshing) return
-    refreshing = true
-
-    try {
-      const result = await withDeadline(fetchUsage(), REFRESH_TIMEOUT_MS)
-      if (disposed) return
-
-      if (!result) {
-        setStatus({ kind: "error", message: "request timed out" })
-        return
-      }
-
-      setStatus(result.ok ? { kind: "ready", usage: result.usage } : { kind: "error", message: result.error })
-    } catch {
-      if (disposed) return
-      setStatus({ kind: "error", message: "unexpected error" })
-    } finally {
-      refreshing = false
-    }
-  }
-
-  onMount(() => {
-    refresh()
-    const poll = setInterval(refresh, POLL_MS)
-    const clock = setInterval(() => setNow(Date.now()), CLOCK_MS)
-    onCleanup(() => {
-      disposed = true
-      clearInterval(poll)
-      clearInterval(clock)
-    })
-  })
 
   return (
     <box flexDirection="column" width="100%">
       <text fg={palette().muted}>Go usage</text>
-      <Show when={status().kind === "loading"}>
+      <Show when={props.status().kind === "loading"}>
         <text fg={palette().muted}>{"\u2026"}</text>
       </Show>
       <Show
         when={(() => {
-          const current = status()
+          const current = props.status()
           return current.kind === "error" ? current : undefined
         })()}
         keyed
@@ -152,7 +102,7 @@ const Panel = (props: { theme: unknown }) => {
       </Show>
       <Show
         when={(() => {
-          const current = status()
+          const current = props.status()
           return current.kind === "ready" ? current.usage : undefined
         })()}
         keyed
@@ -160,7 +110,7 @@ const Panel = (props: { theme: unknown }) => {
         {(usage) => (
           <box flexDirection="column" width="100%">
             {ROWS.map((row) => (
-              <Row label={row.label} window={usage[row.key]} now={now()} palette={palette()} />
+              <Row label={row.label} window={usage[row.key]} now={props.now()} palette={palette()} />
             ))}
           </box>
         )}
@@ -172,9 +122,31 @@ const Panel = (props: { theme: unknown }) => {
 export default Plugin.define({
   id: "go-usage-meter",
   setup(context) {
-    return context.ui.slot({
-      append: "sidebar.footer",
-      render: () => <Panel theme={context.theme} />,
+    const [status, setStatus] = createSignal<Status>({ kind: "loading" })
+    const [now, setNow] = createSignal(Date.now())
+
+    const refresher = createRefresher({
+      load: fetchUsage,
+      timeoutMs: REFRESH_TIMEOUT_MS,
+      onValue: (result) =>
+        setStatus(result.ok ? { kind: "ready", usage: result.usage } : { kind: "error", message: result.error }),
+      onError: (message) => setStatus({ kind: "error", message }),
     })
+
+    refresher.refresh()
+    const poll = setInterval(refresher.refresh, POLL_MS)
+    const clock = setInterval(() => setNow(Date.now()), CLOCK_MS)
+
+    const release = context.ui.slot({
+      append: "sidebar.footer",
+      render: () => <Panel theme={context.theme} status={status} now={now} />,
+    })
+
+    return () => {
+      refresher.dispose()
+      clearInterval(poll)
+      clearInterval(clock)
+      release()
+    }
   },
 })
