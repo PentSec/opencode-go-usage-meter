@@ -77,7 +77,11 @@ async function fromDatabase(directory: string): Promise<string | undefined> {
   let db: import("bun:sqlite").Database | undefined
   try {
     db = new Database(join(directory, "opencode.db"), { readonly: true })
-    const statement = db.query("select value from credential where integration_id = ? and active = 1 limit 1")
+    // `active` is nullable with no default. Legacy rows store NULL, which means
+    // the credential is active; an explicit 1 wins when both shapes coexist.
+    const statement = db.query(
+      "select value from credential where integration_id = ? and coalesce(active, 1) = 1 order by (active is 1) desc limit 1",
+    )
 
     for (const providerID of PROVIDER_IDS) {
       const row = statement.get(providerID) as { value?: string } | null

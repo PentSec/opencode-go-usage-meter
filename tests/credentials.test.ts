@@ -12,7 +12,7 @@ const temporaryDirectories: string[] = []
 type CredentialRow = {
   integrationId: string
   value: unknown
-  active?: boolean
+  active?: boolean | null
 }
 
 beforeEach(() => {
@@ -41,10 +41,10 @@ async function writeAuthFile(directory: string, store: unknown): Promise<void> {
 function writeDatabase(directory: string, rows: CredentialRow[]): void {
   const database = new Database(join(directory, "opencode.db"))
   try {
-    database.run("create table credential (integration_id text not null, value text not null, active integer not null)")
+    database.run("create table credential (integration_id text not null, value text not null, active integer)")
     const insert = database.query("insert into credential (integration_id, value, active) values (?, ?, ?)")
     for (const row of rows) {
-      insert.run(row.integrationId, JSON.stringify(row.value), row.active === false ? 0 : 1)
+      insert.run(row.integrationId, JSON.stringify(row.value), row.active === undefined ? 1 : row.active === null ? null : row.active ? 1 : 0)
     }
   } finally {
     database.close()
@@ -146,6 +146,23 @@ describe("resolveApiKey", () => {
     ])
 
     expect(await resolveApiKey([directory])).toBe("console-key")
+  })
+
+  test("reads a legacy row whose active column is NULL", async () => {
+    const directory = await makeDirectory()
+    writeDatabase(directory, [{ integrationId: "opencode-go", value: { key: "legacy-key" }, active: null }])
+
+    expect(await resolveApiKey([directory])).toBe("legacy-key")
+  })
+
+  test("prefers an explicit active row over a legacy NULL row", async () => {
+    const directory = await makeDirectory()
+    writeDatabase(directory, [
+      { integrationId: "opencode-go", value: { key: "legacy-key" }, active: null },
+      { integrationId: "opencode-go", value: { key: "active-key" }, active: true },
+    ])
+
+    expect(await resolveApiKey([directory])).toBe("active-key")
   })
 
   test("prefers the database over auth.json", async () => {
