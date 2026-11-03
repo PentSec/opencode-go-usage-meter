@@ -7,7 +7,7 @@
  * claim, and the real OpenTUI test renderer mounts it.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
-import type { Context } from "@opencode/plugin/tui"
+import type { Plugin } from "@opencode/plugin/tui"
 import { testRender } from "@opentui/solid"
 import * as usageModule from "../src/usage.ts"
 import type { UsageResult } from "../src/usage.ts"
@@ -79,7 +79,7 @@ function fakeHost() {
         return () => {}
       },
     },
-  } as unknown as Context
+  } as unknown as Plugin.Context
 
   return { context, claims }
 }

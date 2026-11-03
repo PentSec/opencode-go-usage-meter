@@ -10,7 +10,7 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node", "bun"]
   },
-  "include": ["index.ts", "tui.tsx", "src/**/*.ts"]
+  "include": ["index.ts", "tui.tsx", "src/**/*.ts", "tests/**/*.ts", "tests/**/*.tsx"]
 }

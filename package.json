@@ -38,6 +38,8 @@
   },
   "homepage": "https://github.com/PentSec/opencode-go-usage-meter#readme",
   "devDependencies": {
+    "@opentui/solid": "0.6.6",
+    "@types/bun": "1.4.4",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3"
   },
