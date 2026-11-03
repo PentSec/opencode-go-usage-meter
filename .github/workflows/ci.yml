@@ -1,6 +1,6 @@
 name: ci
 
-# Typecheck gate for pull requests and for main.
+# Typecheck and test gates for pull requests and for main.
 #
 # The package ships TypeScript sources (`index.ts`, `tui.tsx`, `src/`) that
 # OpenCode compiles when it loads the plugin, so a type error is a runtime
@@ -8,8 +8,9 @@ name: ci
 # it, which makes this workflow the only check between a broken type and a
 # published release.
 #
-# `npm ci` needs `package-lock.json` committed; it is the single source of the
-# dependency tree that gets published.
+# The suites under `tests/` run with Bun's test runner. Node still installs the
+# dependency tree so both jobs share `package-lock.json`, which is the single
+# source of the dependency tree that gets published.
 
 on:
   pull_request:
@@ -41,3 +42,28 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install
+        run: npm ci
+
+      # `--pass-with-no-tests` keeps main green until the first suite lands.
+      # Once `tests/` holds a test file the flag changes nothing.
+      - name: Test
+        run: bun test --pass-with-no-tests --preload @opentui/solid/preload tests
