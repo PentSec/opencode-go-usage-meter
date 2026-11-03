@@ -298,6 +298,74 @@ describe("characterization: unchanged theme colors", () => {
   })
 })
 
+describe("severity colors per row", () => {
+  const COLORS: Record<"ok" | "warn" | "danger", number[]> = {
+    ok: [0x00, 0xff, 0x00],
+    warn: [0xff, 0xff, 0x00],
+    danger: [0xff, 0x00, 0x00],
+  }
+
+  type Span = { text: string; fg: { toInts(): number[] } }
+
+  function rowSpans(frame: { lines: Array<{ spans: Span[] }> }, label: string) {
+    const line = frame.lines.find((entry) =>
+      entry.spans.some((span) => span.text === `${label.padEnd(3)} `),
+    )
+    if (!line) throw new Error(`missing row ${label}`)
+
+    const pick = (pattern: RegExp, what: string) => {
+      const span = line.spans.find((entry) => pattern.test(entry.text))
+      if (!span) throw new Error(`missing ${what} in row ${label}: ${JSON.stringify(line.spans.map((entry) => entry.text))}`)
+      return span
+    }
+
+    return {
+      label: pick(/^\S+\s+$/, "label"),
+      filled: pick(/^\u2501+$/, "filled bar"),
+      empty: pick(/^\u2500+$/, "empty bar"),
+      percent: pick(/^\s*\d+%/, "percent"),
+      pace: pick(/\+\d+pp|on pace|-\d+pp/, "pace"),
+    }
+  }
+
+  test("each row takes the color of its own percentage", async () => {
+    const { view } = await mount(usage({ rolling: 74, weekly: 75, monthly: 90 }))
+    const frame = view.captureSpans()
+
+    const expected = [
+      { label: "5h", percent: "74%", color: COLORS.ok },
+      { label: "7d", percent: "75%", color: COLORS.warn },
+      { label: "1mo", percent: "90%", color: COLORS.danger },
+    ]
+
+    for (const row of expected) {
+      const spans = rowSpans(frame, row.label)
+      expect(spans.percent.text.match(/^\s*(\d+)%/)![1] + "%").toBe(row.percent)
+      expect(spans.filled.fg.toInts().slice(0, 3)).toEqual(row.color)
+      expect(spans.percent.fg.toInts().slice(0, 3)).toEqual(row.color)
+      expect(spans.empty.fg.toInts().slice(0, 3)).toEqual([0x12, 0x34, 0x56])
+      expect(spans.label.fg.toInts().slice(0, 3)).toEqual([0xaa, 0xaa, 0xaa])
+    }
+  })
+
+  test("pins the 89 to 90 boundary of the danger bucket", async () => {
+    const { view } = await mount(usage({ rolling: 89, weekly: 90, monthly: 10 }))
+    const frame = view.captureSpans()
+
+    const expected = [
+      { label: "5h", color: COLORS.warn },
+      { label: "7d", color: COLORS.danger },
+      { label: "1mo", color: COLORS.ok },
+    ]
+
+    for (const row of expected) {
+      const spans = rowSpans(frame, row.label)
+      expect(spans.filled.fg.toInts().slice(0, 3)).toEqual(row.color)
+      expect(spans.percent.fg.toInts().slice(0, 3)).toEqual(row.color)
+    }
+  })
+})
+
 describe("characterization: unchanged poll schedule", () => {
   test("schedules one refresh poll and one clock", async () => {
     await mount(usage({ rolling: 1, weekly: 2, monthly: 3 }))
