@@ -12,6 +12,7 @@ import { Plugin } from "@opencode/plugin/tui"
 import type { RGBA } from "@opentui/core"
 import { createSignal, Show } from "solid-js"
 import { bar, remaining, severity, type Severity } from "./src/format.ts"
+import { formatPace, paceOf } from "./src/pace.ts"
 import { createRefresher } from "./src/refresh.ts"
 import { clampPercent, fetchUsage, type Usage, type UsageWindow, type UsageWindowKind } from "./src/usage.ts"
 
@@ -21,16 +22,22 @@ const CLOCK_MS = 30_000
 /** Upper bound for a whole refresh cycle, credential lookup included. */
 const REFRESH_TIMEOUT_MS = 15_000
 
+/** Fixed widths of the row columns, in cells. */
+const LABEL_WIDTH = 3
+const PERCENT_WIDTH = 4
+const PACE_WIDTH = 7
+
 const ROWS: { key: UsageWindowKind; label: string }[] = [
   { key: "rolling", label: "5h" },
   { key: "weekly", label: "7d" },
-  { key: "monthly", label: "30d" },
+  { key: "monthly", label: "1mo" },
 ]
 
-const FALLBACK_COLORS: Record<Severity, string> = {
+const FALLBACK_COLORS: Record<Severity | "info", string> = {
   ok: "#3FB950",
   warn: "#D29922",
   danger: "#F85149",
+  info: "#39C5CF",
 }
 
 type Color = string | RGBA
@@ -41,6 +48,7 @@ type Palette = {
   ok?: Color
   warn?: Color
   danger?: Color
+  info?: Color
 }
 
 /**
@@ -58,6 +66,7 @@ function paletteOf(theme: unknown): Palette {
     ok: (feedback?.success?.base ?? FALLBACK_COLORS.ok) as Color | undefined,
     warn: (feedback?.warning?.base ?? FALLBACK_COLORS.warn) as Color | undefined,
     danger: (feedback?.error?.base ?? FALLBACK_COLORS.danger) as Color | undefined,
+    info: (feedback?.info?.base ?? FALLBACK_COLORS.info) as Color | undefined,
   }
 }
 
@@ -65,17 +74,45 @@ function colorFor(palette: Palette, percent: number): Color | undefined {
   return palette[severity(percent)]
 }
 
-const Row = (props: { label: string; window: UsageWindow; now: number; palette: Palette }) => {
+const Row = (props: {
+  label: string
+  window: UsageWindow
+  windowKind: UsageWindowKind
+  now: () => number
+  palette: Palette
+}) => {
   const percent = () => clampPercent(props.window.percent)
   const segments = () => bar(percent())
+  const pace = () =>
+    paceOf({
+      usedPercent: props.window.percent,
+      resetsAt: props.window.resetsAt,
+      windowKind: props.windowKind,
+      now: props.now(),
+    })
+  const paceColor = () => {
+    const current = pace()
+    if (current === undefined) return props.palette.muted
+    if (current.kind === "reserve") return props.palette.ok
+    if (current.kind === "deficit") return props.palette.warn
+
+    return props.palette.info
+  }
 
   return (
     <box flexDirection="row" width="100%">
-      <text fg={props.palette.muted}>{props.label.padEnd(4)}</text>
-      <text fg={colorFor(props.palette, percent())}>{segments().filled}</text>
-      <text fg={props.palette.track}>{segments().empty}</text>
-      <text fg={colorFor(props.palette, percent())}>{` ${percent()}%`}</text>
-      <text fg={props.palette.muted}>{`  \u21bb ${remaining(props.window.resetsAt, props.now)}`}</text>
+      <text fg={props.palette.muted}>{`${props.label.padEnd(LABEL_WIDTH)} `}</text>
+      <text fg={colorFor(props.palette, percent())}>
+        {segments().filled}
+        <span style={{ fg: props.palette.track }}>{segments().empty}</span>
+      </text>
+      <text fg={colorFor(props.palette, percent())}>
+        {` ${String(percent()).padStart(PERCENT_WIDTH - 1)}%`}
+      </text>
+      <text fg={paceColor()}>{` ${formatPace(pace()).padEnd(PACE_WIDTH)}`}</text>
+      <text fg={props.palette.muted}>
+        {`  \u21bb ${remaining(props.window.resetsAt, props.now())}`}
+      </text>
     </box>
   )
 }
@@ -110,7 +147,13 @@ const Panel = (props: { theme: unknown; status: () => Status; now: () => number 
         {(usage) => (
           <box flexDirection="column" width="100%">
             {ROWS.map((row) => (
-              <Row label={row.label} window={usage[row.key]} now={props.now()} palette={palette()} />
+              <Row
+                label={row.label}
+                window={usage[row.key]}
+                windowKind={row.key}
+                now={props.now}
+                palette={palette()}
+              />
             ))}
           </box>
         )}

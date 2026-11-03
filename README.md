@@ -17,13 +17,37 @@ shows, read from the official usage endpoint.
 
 ```
 Go usage
-5h  ──────────────── 0%  ↻ 4h 56m
-7d  ──────────────── 3%  ↻ 6d 4h
-30d ━━────────────── 10%  ↻ 25d 16h
+5h  ━─────────   8% +10pp    ↻ 4h 6m
+7d  ━━━━──────  42% on pace  ↻ 4d 4h
+1mo ━─────────  13% on pace  ↻ 25d 16h
 ```
 
-One line per window: label, bar, percentage and time until the window resets.
-Bars turn yellow from 75% and red from 90%.
+One line per window: label, bar, percentage, pace and time until the window
+resets. Columns are fixed width so the rows stay aligned: 3 cells for the
+label, 10 for the bar, 4 for the percentage (100% is the widest) and 7 for the
+pace indicator. Bars turn yellow from 75% and red from 90%.
+
+### Pace
+
+The pace indicator compares the used percentage with the share of the window
+that has already elapsed. Rolling is exactly 5 hours and weekly is exactly
+7 days. The monthly window follows the subscription anniversary: it starts one
+UTC calendar month before `resetsAt`, so it lasts 28 to 31 days. The start keeps
+the UTC time fields of `resetsAt` and clamps the day to the last valid day of the
+previous month: 31 March starts on 28 February (29 in leap years), and 31 May starts on 30 April.
+Calendar time counts in full, including Saturdays and Sundays.
+
+Deviations are rounded to whole points before the bucket is chosen: a rounded
+magnitude of 5 or less is on pace, and anything above that is a reserve or a
+deficit based on the sign of the original deviation.
+
+| Label | Meaning | Color |
+| --- | --- | --- |
+| `+12pp` | Reserve: usage is 12 points below the elapsed share | green |
+| `on pace` | Rounded difference is at most 5 points | cyan |
+| `-12pp` | Deficit: usage is 12 points above the elapsed share | yellow |
+
+A missing or invalid reset timestamp hides the pace label.
 
 ## Requirements
 

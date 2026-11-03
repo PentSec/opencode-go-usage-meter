@@ -1,7 +1,7 @@
 import { clampPercent } from "./usage.ts"
 
-/** Width of the drawing area in characters. */
-export const BAR_WIDTH = 16
+/** Width of the drawing area in characters. Fixed so rows stay aligned. */
+export const BAR_WIDTH = 10
 
 const FILLED = "\u2501" // ━
 const EMPTY = "\u2500" // ─
