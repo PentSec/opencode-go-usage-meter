@@ -143,6 +143,15 @@ the list is empty it shows `no credential found`.
 | Nothing rendered | The sidebar is hidden, or you are not inside a session. Sidebar slots only exist within a session. |
 | Plugin does not load | Check `/plugins` in the TUI. The configured path must be a directory containing `package.json`. |
 
+## Why the slot is re-claimed on every update
+
+OpenCode ships this package under `node_modules`. Its Solid JSX loader skips
+paths that contain `node_modules`, so the `render` function here runs once and
+would never repaint on such hosts: the panel would freeze on the first state
+(`Go usage` + `…`). The setup therefore releases and re-claims the sidebar slot
+after every state change, which renders the current state again and keeps the
+countdown live. The same re-claim is harmless when the transform does run.
+
 ## Plugin package layout
 
 The package follows the OpenCode v2 CLI plugin contract:
