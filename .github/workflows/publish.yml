@@ -24,6 +24,8 @@ name: publish
 #     opt-in this workflow needs, otherwise a release can only be staged for
 #     manual approval.
 #   - Trusted publishing requires npm >= 11.5.1 and Node >= 22.14.0.
+#   - The publish job rebuilds `tui.js`, the entry consumers load, and refuses
+#     to publish when the committed artifact does not match `tui.tsx`.
 
 on:
   release:
@@ -66,6 +68,20 @@ jobs:
           name=$(npm pkg get name | tr -d '"')
           if [ "$name" != "opencode-go-usage-meter" ]; then
             echo "Unexpected package name: $name" >&2
+            exit 1
+          fi
+
+      # `tui.js` is what consumers load, and it is committed. Rebuild it from
+      # `tui.tsx` and refuse to publish a stale or missing artifact, which can
+      # otherwise happen when a release points at a commit CI never checked.
+      - name: Install
+        run: npm ci
+
+      - name: Verify the TUI entry is current
+        run: |
+          npm run build
+          if [ -n "$(git status --porcelain -- tui.js)" ]; then
+            echo "tui.js is stale; run 'npm run build' and commit the result" >&2
             exit 1
           fi
 
