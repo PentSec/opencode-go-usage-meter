@@ -1,0 +1,4 @@
+# The compiled TUI entry is committed, and CI compares the file the build
+# writes with the one in the repository. Pin it to LF so a checkout with
+# `core.autocrlf=true` does not rewrite it and fail that check.
+tui.js text eol=lf
