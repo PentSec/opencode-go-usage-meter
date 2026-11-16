@@ -181,6 +181,30 @@ describe("panel lifecycle", () => {
     await second.dispose()
   })
 
+  test("re-claims the slot on state changes so a static host still repaints", async () => {
+    const host = await startPlugin()
+    expect(host.claims, "one claim at setup").toHaveLength(1)
+
+    const first = await mount(host.claims[0]!)
+    loads[0]!.resolve(ready(42))
+    await settle()
+
+    expect(host.released(), "the previous claim is released").toBe(1)
+    expect(host.claims, "a fresh claim carries the new state").toHaveLength(2)
+
+    await first.dispose()
+
+    const second = await mount(host.claims[1]!)
+    expect(second.captureCharFrame(), "the fresh claim renders the loaded usage").toContain("42%")
+
+    clocks()[0]!.run()
+    await settle()
+    expect(host.claims, "the clock tick re-claims for the countdown").toHaveLength(3)
+
+    await second.dispose()
+    host.cleanup?.()
+  })
+
   test("keeps error state across a panel remount without a new load", async () => {
     const host = await startPlugin()
     const first = await mount(host.claims[0]!)
