@@ -4,6 +4,11 @@
  *
  * See ../README.md for installation and behaviour details.
  *
+ * OpenCode loads `tui.js`, the Solid output compiled from this file: the host
+ * JSX loader skips `node_modules`, so the shipped entry has to carry the
+ * reactive code already. Edit this file and run `npm run build` (or
+ * `npm test`, which builds first); CI rejects a stale `tui.js`.
+ *
  * State lives in `setup`, not in the component: unmounting and remounting a
  * slot panel must keep the current usage state and the refresh cycle alive.
  * The panel reads the signals through accessors.
@@ -168,46 +173,28 @@ export default Plugin.define({
     const [status, setStatus] = createSignal<Status>({ kind: "loading" })
     const [now, setNow] = createSignal(Date.now())
 
-    // Some hosts install plugins inside `node_modules` and only run the Solid
-    // JSX transform outside it. On those hosts this render function evaluates
-    // once, so the panel would show the first state forever. Claiming the slot
-    // again on every state change paints the current state from scratch and
-    // keeps the panel live there, while staying a no-op visually elsewhere.
-    let release: (() => void) | undefined
-    const claim = () => {
-      release?.()
-      release = context.ui.slot({
-        append: "sidebar.footer",
-        render: () => <Panel theme={context.theme} status={status} now={now} />,
-      })
-    }
-    claim()
-
     const refresher = createRefresher({
       load: fetchUsage,
       timeoutMs: REFRESH_TIMEOUT_MS,
-      onValue: (result) => {
-        setStatus(result.ok ? { kind: "ready", usage: result.usage } : { kind: "error", message: result.error })
-        claim()
-      },
-      onError: (message) => {
-        setStatus({ kind: "error", message })
-        claim()
-      },
+      onValue: (result) =>
+        setStatus(result.ok ? { kind: "ready", usage: result.usage } : { kind: "error", message: result.error }),
+      onError: (message) => setStatus({ kind: "error", message }),
     })
 
     refresher.refresh()
     const poll = setInterval(refresher.refresh, POLL_MS)
-    const clock = setInterval(() => {
-      setNow(Date.now())
-      claim()
-    }, CLOCK_MS)
+    const clock = setInterval(() => setNow(Date.now()), CLOCK_MS)
+
+    const release = context.ui.slot({
+      append: "sidebar.footer",
+      render: () => <Panel theme={context.theme} status={status} now={now} />,
+    })
 
     return () => {
       refresher.dispose()
       clearInterval(poll)
       clearInterval(clock)
-      release?.()
+      release()
     }
   },
 })

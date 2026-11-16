@@ -2,6 +2,11 @@
 /**
  * Lifecycle reproduction against the real plugin setup and a fake host.
  *
+ * The suite loads `tui.js`, the entry OpenCode resolves from `package.json`,
+ * and Bun leaves that file untouched because the Solid loader only rewrites
+ * `.jsx`/`.tsx`. The tests therefore run the code a host without the transform
+ * runs, which is the environment the panel has to stay live in.
+ *
  * The fake host records the slot claim, so a test can mount the claim's render
  * function, dispose it, and mount the same claim again. The real OpenTUI test
  * renderer provides the Solid root for each mount.
@@ -41,7 +46,9 @@ function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status })
 }
 
-const { default: plugin } = await import("../tui.tsx")
+// A non-literal specifier keeps `tsc` on `tui.tsx` while the test runs the
+// compiled entry that ships.
+const { default: plugin } = await import("../" + "tui.js")
 
 type Claim = { render: (input: { sessionID: string }) => unknown }
 
@@ -181,28 +188,40 @@ describe("panel lifecycle", () => {
     await second.dispose()
   })
 
-  test("re-claims the slot on state changes so a static host still repaints", async () => {
+  test("paints every state change from one claim, with no re-claim", async () => {
     const host = await startPlugin()
     expect(host.claims, "one claim at setup").toHaveLength(1)
 
-    const first = await mount(host.claims[0]!)
-    loads[0]!.resolve(ready(42))
+    const base = Date.parse("2030-01-01T00:00:00Z")
+    dateSpy = spyOn(Date, "now").mockReturnValue(base)
+
+    const view = await mount(host.claims[0]!)
+    expect(view.captureCharFrame(), "the panel starts on the loading state").toContain("\u2026")
+
+    loads[0]!.resolve(
+      json(200, {
+        usage: {
+          rolling: { percent: 42, resetsAt: new Date(base + 3_600_000).toISOString() },
+          weekly: { percent: 10 },
+          monthly: { percent: 5 },
+        },
+      }),
+    )
     await settle()
+    await view.flush()
+    expect(view.captureCharFrame(), "a resolved load repaints the mounted panel").toContain("42%")
 
-    expect(host.released(), "the previous claim is released").toBe(1)
-    expect(host.claims, "a fresh claim carries the new state").toHaveLength(2)
-
-    await first.dispose()
-
-    const second = await mount(host.claims[1]!)
-    expect(second.captureCharFrame(), "the fresh claim renders the loaded usage").toContain("42%")
-
+    dateSpy.mockReturnValue(base + 1_800_000)
     clocks()[0]!.run()
     await settle()
-    expect(host.claims, "the clock tick re-claims for the countdown").toHaveLength(3)
+    await view.flush()
+    expect(view.captureCharFrame(), "a clock tick repaints the mounted panel").toContain("30m")
 
-    await second.dispose()
+    expect(host.claims, "the panel never claims the slot twice").toHaveLength(1)
+    expect(host.released(), "the panel never releases the slot").toBe(0)
+
     host.cleanup?.()
+    await view.dispose()
   })
 
   test("keeps error state across a panel remount without a new load", async () => {

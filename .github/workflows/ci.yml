@@ -2,15 +2,17 @@ name: ci
 
 # Typecheck and test gates for pull requests and for main.
 #
-# The package ships TypeScript sources (`index.ts`, `tui.tsx`, `src/`) that
-# OpenCode compiles when it loads the plugin, so a type error is a runtime
-# failure for users rather than a build error. There is no build step to catch
-# it, which makes this workflow the only check between a broken type and a
-# published release.
+# `index.ts` and the sources under `src/` ship as TypeScript and are compiled by
+# the host when it loads the plugin, so a type error is a runtime failure for
+# users rather than a build error. The TUI entry is different: OpenCode resolves
+# `tui.js`, because the host JSX loader skips `node_modules`, so the Solid
+# output is compiled here instead of at load time. That artifact is committed,
+# and this workflow fails when it no longer matches `tui.tsx`.
 #
-# The suites under `tests/` run with Bun's test runner. Node still installs the
-# dependency tree so both jobs share `package-lock.json`, which is the single
-# source of the dependency tree that gets published.
+# The suites under `tests/` run with Bun's test runner against the built entry,
+# the one a host without the transform actually loads. Node installs the
+# dependency tree so CI shares `package-lock.json`, which is the single source
+# of the dependency tree that gets published.
 
 on:
   pull_request:
@@ -43,6 +45,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Build the TUI entry
+        run: npm run build
+
+      # The build is deterministic, so any reported entry means `tui.js` was not
+      # regenerated after a change to `tui.tsx`, or was never committed.
+      - name: Check that tui.js matches tui.tsx
+        run: test -z "$(git status --porcelain -- tui.js)"
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -63,7 +73,7 @@ jobs:
       - name: Install
         run: npm ci
 
-      # `--pass-with-no-tests` keeps main green until the first suite lands.
-      # Once `tests/` holds a test file the flag changes nothing.
+      # `npm test` rebuilds `tui.js` first, so the suites always exercise the
+      # current sources rather than the committed artifact.
       - name: Test
-        run: bun test --pass-with-no-tests --preload @opentui/solid/preload tests
+        run: npm test

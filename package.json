@@ -7,17 +7,19 @@
   "type": "module",
   "exports": {
     ".": "./index.ts",
-    "./tui": "./tui.tsx"
+    "./tui": "./tui.js"
   },
   "files": [
     "index.ts",
-    "tui.tsx",
+    "tui.js",
     "src",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "build": "node scripts/build-tui.mjs",
     "typecheck": "tsc --noEmit",
+    "pretest": "npm run build",
     "test": "bun test --preload @opentui/solid/preload tests"
   },
   "keywords": [
@@ -38,9 +40,12 @@
   },
   "homepage": "https://github.com/PentSec/opencode-go-usage-meter#readme",
   "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/preset-typescript": "^7.27.1",
     "@opentui/solid": "0.6.6",
     "@types/bun": "1.4.4",
     "@types/node": "^22.0.0",
+    "babel-preset-solid": "^1.9.12",
     "typescript": "^5.9.3"
   },
   "dependencies": {

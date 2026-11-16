@@ -73,7 +73,8 @@ From a local checkout (useful while developing):
 ```bash
 git clone https://github.com/PentSec/opencode-go-usage-meter.git
 cd opencode-go-usage-meter
-npm install   # installs the plugin dependency and peer dependencies
+npm install    # plugin dependency, peer dependencies and build tools
+npm run build  # only after editing tui.tsx; a fresh clone ships tui.js
 ```
 
 ```jsonc
@@ -143,14 +144,22 @@ the list is empty it shows `no credential found`.
 | Nothing rendered | The sidebar is hidden, or you are not inside a session. Sidebar slots only exist within a session. |
 | Plugin does not load | Check `/plugins` in the TUI. The configured path must be a directory containing `package.json`. |
 
-## Why the slot is re-claimed on every update
+## Why the TUI entry is compiled before publishing
 
-OpenCode ships this package under `node_modules`. Its Solid JSX loader skips
-paths that contain `node_modules`, so the `render` function here runs once and
-would never repaint on such hosts: the panel would freeze on the first state
-(`Go usage` + `…`). The setup therefore releases and re-claims the sidebar slot
-after every state change, which renders the current state again and keeps the
-countdown live. The same re-claim is harmless when the transform does run.
+OpenCode installs plugins under `node_modules`, and its Solid JSX loader skips
+paths that contain `node_modules`. A `.tsx` entry therefore reaches the host
+untransformed, and the generic JSX runtime evaluates every expression as an
+eager prop: the panel would paint the loading state (`Go usage` + `…`) once and
+never update.
+
+The package ships `tui.js` instead, the Solid output that
+`scripts/build-tui.mjs` compiles from `tui.tsx` with `babel-preset-solid` for
+the `@opentui/solid` runtime. The compiled entry carries the reactive code
+itself, so the panel repaints on every state change from a single slot claim,
+whether or not the host runs the transform.
+
+Edit `tui.tsx` only and run `npm run build` to regenerate `tui.js`. `npm test`
+builds first, and CI fails when the committed `tui.js` no longer matches.
 
 ## Plugin package layout
 
@@ -161,7 +170,7 @@ The package follows the OpenCode v2 CLI plugin contract:
   "type": "module",
   "exports": {
     ".": "./index.ts",
-    "./tui": "./tui.tsx"
+    "./tui": "./tui.js"
   },
   "dependencies": {
     "@opencode/plugin": "latest"
@@ -178,7 +187,7 @@ The package follows the OpenCode v2 CLI plugin contract:
   imports: loading `@opentui/solid` outside the renderer fails with
   `OPENTUI_FORCE_WCWIDTH is already registered`.
 - `"./tui"` is the TUI entry, built with `Plugin.define` from
-  `@opencode/plugin/tui`.
+  `@opencode/plugin/tui` and published as the precompiled `tui.js`.
 
 ### Remote servers
 
