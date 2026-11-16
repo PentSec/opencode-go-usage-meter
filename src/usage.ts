@@ -52,8 +52,8 @@ export function parseUsage(payload: unknown): Usage | undefined {
   return { rolling, weekly, monthly }
 }
 
-/** One credential attempt: either a settled result or a rejected credential. */
-type Attempt = { kind: "ready"; result: UsageResult } | { kind: "rejected" }
+/** One credential attempt: either a settled result or a credential the endpoint refused. */
+type Attempt = { kind: "ready"; result: UsageResult } | { kind: "rejected" } | { kind: "unentitled" }
 
 /** Credential that produced the last non-rejected response, tried first later. */
 let lastWorkingKey: string | undefined
@@ -71,6 +71,20 @@ function orderCandidates(candidates: string[]): string[] {
   return [lastWorkingKey, ...candidates.filter((candidate) => candidate !== lastWorkingKey)]
 }
 
+/**
+ * A `403` means the key authenticated but the account has no Go subscription
+ * when the body carries the endpoint's `EntitlementError`. Any other `403`, such
+ * as an HTML block from the edge, stays a plain HTTP failure.
+ */
+async function isEntitlementError(response: Response): Promise<boolean> {
+  try {
+    const payload = (await response.json()) as { error?: { type?: unknown } } | undefined
+    return payload?.error?.type === "EntitlementError"
+  } catch {
+    return false
+  }
+}
+
 /** Try one credential. Only a 401 means the credential itself is wrong. */
 async function attemptUsage(key: string): Promise<Attempt> {
   let response: Response
@@ -86,6 +100,7 @@ async function attemptUsage(key: string): Promise<Attempt> {
   }
 
   if (response.status === 401) return { kind: "rejected" }
+  if (response.status === 403 && (await isEntitlementError(response))) return { kind: "unentitled" }
   if (response.status === 429) return { kind: "ready", result: { ok: false, error: "rate limited" } }
   if (!response.ok) return { kind: "ready", result: { ok: false, error: `HTTP ${response.status}` } }
 
@@ -127,13 +142,15 @@ async function* candidateKeys(directories: string[] | undefined): AsyncGenerator
 /**
  * Fetch the three usage windows for the current account.
  *
- * Candidates are tried in order and a rejected one falls through to the next,
- * so a stale OAuth token cannot hide a working API key. Any other outcome stops
- * the chain: retrying with another credential would not fix the network, the
- * rate limit or the response shape.
+ * Candidates are tried in order and a refused one falls through to the next,
+ * so a stale OAuth token cannot hide a working API key, and a key without a Go
+ * subscription cannot hide one that has it. Any other outcome stops the chain:
+ * retrying with another credential would not fix the network, the rate limit or
+ * the response shape.
  */
 export async function fetchUsage(directories?: string[]): Promise<UsageResult> {
   let attempted = 0
+  let unentitled = false
 
   for await (const key of candidateKeys(directories)) {
     attempted += 1
@@ -145,9 +162,19 @@ export async function fetchUsage(directories?: string[]): Promise<UsageResult> {
       continue
     }
 
+    if (attempt.kind === "unentitled") {
+      // The key is valid but its account has no Go plan; the next candidate may.
+      unentitled = true
+      continue
+    }
+
     lastWorkingKey = key
     return attempt.result
   }
 
-  return attempted === 0 ? { ok: false, error: "no credential found" } : { ok: false, error: "credential rejected" }
+  if (attempted === 0) return { ok: false, error: "no credential found" }
+
+  // A subscription gap is the actionable fact even when another candidate's
+  // credential was rejected: neither can read the usage windows.
+  return unentitled ? { ok: false, error: "no Go subscription" } : { ok: false, error: "credential rejected" }
 }

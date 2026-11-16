@@ -127,20 +127,23 @@ when it is absent or rejected, so a working environment key never opens the
 database or `auth.json`.
 
 The plugin does not test a credential in advance. It tries the candidates in the
-order above and moves to the next one only when the endpoint returns HTTP 401.
-Any other outcome stops the chain, because a network error, a rate limit or a
-malformed response would not improve with another credential. Once a credential
-works, later polls try it first, and a credential rejected by every poll stops
-being preferred.
+order above and moves to the next one when the endpoint rejects the key (HTTP
+401) or accepts it but reports no Go subscription (HTTP 403 with an
+`EntitlementError` body). Any other outcome stops the chain, because a network
+error, a rate limit or a malformed response would not improve with another
+credential. Once a credential works, later polls try it first, and a credential
+rejected by every poll stops being preferred.
 
-When every candidate is rejected the panel shows `credential rejected`; when
-the list is empty it shows `no credential found`.
+When every candidate is rejected the panel shows `credential rejected`; when at
+least one candidate is valid but has no Go plan it shows `no Go subscription`;
+when the list is empty it shows `no credential found`.
 
 ## Troubleshooting
 
 | Symptom | Cause |
 | --- | --- |
 | `✗ credential rejected` | The usage API returned 401. Reconnect OpenCode Go, or set `OPENCODE_GO_API_KEY` to a key created in the Console. |
+| `✗ no Go subscription` | The key is valid but its account has no active Go plan, or the plan lapsed. Subscribe in the Console, or point `OPENCODE_GO_API_KEY` at a key from a subscribed account. |
 | Nothing rendered | The sidebar is hidden, or you are not inside a session. Sidebar slots only exist within a session. |
 | Plugin does not load | Check `/plugins` in the TUI. The configured path must be a directory containing `package.json`. |
 

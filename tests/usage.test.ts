@@ -13,6 +13,12 @@ const PAYLOAD = {
   },
 }
 
+/** Body the endpoint returns for a valid key without a Go subscription. */
+const ENTITLEMENT = {
+  type: "error",
+  error: { type: "EntitlementError", message: "OpenCode Go subscription required." },
+}
+
 const initialApiKey = process.env.OPENCODE_GO_API_KEY
 const temporaryDirectories: string[] = []
 
@@ -83,6 +89,38 @@ describe("fetchUsage credential fallback", () => {
 
     expect(await fetchUsage([directory])).toEqual({ ok: false, error: "credential rejected" })
     expect(keys).toEqual(["reject-a", "reject-b"])
+  })
+
+  test("reports no Go subscription when no candidate is entitled", async () => {
+    const directory = await store({ "opencode-go": { key: "no-go" } })
+    mockFetch(() => json(403, ENTITLEMENT))
+
+    expect(await fetchUsage([directory])).toEqual({ ok: false, error: "no Go subscription" })
+    expect(keys).toEqual(["no-go"])
+  })
+
+  test("falls back to a candidate that holds a Go subscription", async () => {
+    const directory = await store({ "opencode-go": { key: "zen-key" }, opencode: { key: "go-key" } })
+    mockFetch((key) => (key === "zen-key" ? json(403, ENTITLEMENT) : json(200, PAYLOAD)))
+
+    expect(await fetchUsage([directory])).toEqual({ ok: true, usage: PAYLOAD.usage })
+    expect(keys).toEqual(["zen-key", "go-key"])
+  })
+
+  test("reports no Go subscription when a rejected candidate precedes an unentitled one", async () => {
+    const directory = await store({ "opencode-go": { key: "expired" }, opencode: { key: "no-go" } })
+    mockFetch((key) => (key === "expired" ? json(401, {}) : json(403, ENTITLEMENT)))
+
+    expect(await fetchUsage([directory])).toEqual({ ok: false, error: "no Go subscription" })
+    expect(keys).toEqual(["expired", "no-go"])
+  })
+
+  test("keeps the HTTP status for a 403 that is not an entitlement error", async () => {
+    const directory = await store({ "opencode-go": { key: "blocked" }, opencode: { key: "other" } })
+    mockFetch(() => new Response("<html>Forbidden</html>", { status: 403 }))
+
+    expect(await fetchUsage([directory])).toEqual({ ok: false, error: "HTTP 403" })
+    expect(keys).toEqual(["blocked"])
   })
 
   test("stops on a non-401 failure", async () => {
